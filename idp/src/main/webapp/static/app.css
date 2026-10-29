@@ -76,3 +76,5 @@ th { color: var(--muted); font-size: 12px; font-weight: 600; white-space: nowrap
 .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
 .row > div { flex: 1 1 160px; }
 .muted { color: var(--muted); font-size: 13px; }
+.nowrap { white-space: nowrap; }
+button.small { white-space: nowrap; }

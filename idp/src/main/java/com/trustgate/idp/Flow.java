@@ -29,6 +29,8 @@ final class Flow {
     static final String OTP_ATTEMPTS = "otpAttempts";
     static final String ENROLL_SECRET = "enrollSecret";
     static final String FLASH = "flash";
+    /** IdP page to show after login (a fixed path set by the server, never taken from the request). */
+    static final String RETURN_TO = "returnTo";
 
     /** The original /authorize request, resumed after the user has authenticated. */
     record AuthzRequest(String clientId, String redirectUri, String state, String nonce) implements Serializable {}
@@ -80,11 +82,13 @@ final class Flow {
         idp.audit.log(u.username(), "LOGIN_SUCCESS", "amr=pwd+otp sid=" + sso.sid(), Web.clientIp(req));
 
         AuthzRequest ar = (AuthzRequest) s.getAttribute(AUTHZ_REQUEST);
+        String returnTo = (String) s.getAttribute(RETURN_TO);
+        s.removeAttribute(RETURN_TO);
         if (ar != null) {
             s.removeAttribute(AUTHZ_REQUEST);
             redirectWithCode(idp, req, resp, sso, ar);
         } else {
-            resp.sendRedirect(req.getContextPath() + "/");
+            resp.sendRedirect(req.getContextPath() + (returnTo != null ? returnTo : "/"));
         }
     }
 

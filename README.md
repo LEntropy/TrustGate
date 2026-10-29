@@ -20,6 +20,8 @@ Java/JSP로 만든 **통합인증(SSO) + 2차 인증(TOTP) + DB 개인정보 암
                          KEK (PKCS#12 키스토어) ── 감싸기 ──► DEK ──► Oracle: TG_USERS / TG_KEYS / TG_AUDIT
 ```
 
+> **처음 써 보시나요?** [테스트 가이드](docs/TEST_GUIDE.md)에서 설치부터 테스트 10가지까지 화면과 함께 하나씩 따라 할 수 있습니다. 각 단계가 어떤 원리로 동작하고 무엇을 막기 위한 것인지도 설명합니다.
+
 ## 구성
 
 | 모듈 | 내용 |
@@ -109,6 +111,8 @@ powershell -ExecutionPolicy Bypass -File .\run_tests.ps1
 2. **End-to-End (36개 항목)**: Tomcat + Oracle을 띄우고, 쿠키·리다이렉트·CSRF 토큰을 처리하는 Python 클라이언트로 실제 HTTP 흐름을 실행합니다. OTP 코드는 서버와 별개로 Python에서 계산해서 표준 인증 앱과 호환되는지도 확인합니다. Oracle에 직접 SQL로 조회해 평문이 저장되지 않았는지도 확인합니다.
 3. 결과를 `test-results/report.html`로 정리합니다.
 
+데이터베이스에 실제로 저장된 값(암호문, 블라인드 인덱스, 감싼 키)은 `show_db.ps1`로 바로 볼 수 있습니다.
+
 ```
 == 2. SSO: 다른 서비스는 다시 로그인하지 않음 ==
   [PASS] 웹메일 접속 시 로그인·OTP 화면 없이 바로 진입  (/mail/ → /idp/authorize → /mail/callback → /mail/)
@@ -129,6 +133,9 @@ powershell -ExecutionPolicy Bypass -File .\run_tests.ps1
 | Oracle로 바꾸자 IdP 배포 실패 (`No suitable driver`) | `WEB-INF/lib`의 JDBC 드라이버는 Tomcat에서 `DriverManager` 자동 등록 대상이 아님 | URL에 따라 HikariCP에 드라이버 클래스를 명시 |
 | 화면의 한글이 깨짐 | JSP 본문 파일의 인코딩이 지정되지 않아 ISO-8859-1로 읽힘. include한 조각의 `pageEncoding`은 그 조각에만 적용됨 | `web.xml`의 `jsp-property-group`으로 모든 JSP·조각을 UTF-8로 지정 |
 | E2E 테스트가 요청마다 약 2초씩 지연 | Windows에서 `localhost`가 IPv6(::1)로 먼저 연결을 시도하는데, 컨테이너 포트는 IPv4에만 열려 있음 | 테스트 클라이언트가 IPv4를 먼저 시도하도록 변경 (브라우저는 영향 없음) |
+| 관리 콘솔 주소로 들어와 로그인하면 관리 콘솔이 아니라 "내 계정"으로 이동 | 로그인 완료 후 이동할 곳이 IdP 첫 화면으로 고정되어 있었음 (테스트 가이드를 직접 따라 하다 발견) | 서버가 정한 경로만 세션에 기억했다가 로그인 후 그 화면으로 돌려보냄. 요청 값으로 받지 않으므로 오픈 리다이렉트가 생기지 않음 |
+| 감사 로그에서 `ACCOUNT_UNLOCKED`가 실패처럼 빨간색으로 표시 | 이벤트 이름에 `LOCK`이 들어가면 빨간색으로 칠하는 조건이 `UNLOCK`까지 잡음 | 실패·잠금·차단 이벤트를 정확한 이름으로 구분 |
+| OTP 재사용 테스트 직후, 데모 상자에 방금 쓴 코드가 그대로 보임 | 같은 30초 구간 안이라 정상 동작이지만, 처음 쓰는 사람은 "새 코드"를 찾지 못함 | 테스트 가이드에 30초 대기 후 화면을 다시 여는 방법을 안내 |
 | 관리자 사용자 추가가 E2E에서만 실패 | 테스트가 폼이 없는 페이지에서 CSRF 토큰을 읽어 빈 값으로 전송했고, 서버가 정상적으로 거부함 | 테스트가 관리 콘솔 페이지의 토큰을 쓰도록 수정. CSRF 방어가 의도대로 동작함을 확인 |
 
 ## 한계와 다음 단계

@@ -147,6 +147,7 @@ public class AdminServlet extends HttpServlet {
             throws ServletException, IOException {
         Optional<SsoSession> sso = Flow.sso(req);
         if (sso.isEmpty()) {
+            req.getSession().setAttribute(Flow.RETURN_TO, "/admin");
             resp.sendRedirect(req.getContextPath() + "/login");
             return Optional.empty();
         }

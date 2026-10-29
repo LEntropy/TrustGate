@@ -23,13 +23,13 @@
           <tr>
             <td><c:out value="${r.id()}"/></td>
             <td><c:out value="${r.username()}"/><br><span class="muted"><c:out value="${r.role()}"/></span></td>
-            <td><c:out value="${r.name()}"/></td>
+            <td class="nowrap"><c:out value="${r.name()}"/></td>
             <td><c:out value="${r.rrnMasked()}"/><br><span class="muted"><c:out value="${r.phoneMasked()}"/></span></td>
             <td class="cipher" style="max-width:260px"><c:out value="${r.rrnEnc()}"/></td>
             <td class="cipher" style="max-width:160px"><c:out value="${r.rrnIdx()}"/></td>
             <td><span class="pill ${r.rrnKeyVersion() == activeVersion ? 'ok' : 'warn'}">v<c:out value="${r.rrnKeyVersion()}"/></span></td>
-            <td><c:out value="${r.otp() ? '등록' : '미등록'}"/></td>
-            <td><c:if test="${r.locked()}"><span class="pill bad">잠김</span></c:if></td>
+            <td class="nowrap"><c:out value="${r.otp() ? '등록' : '미등록'}"/></td>
+            <td class="nowrap"><c:if test="${r.locked()}"><span class="pill bad">잠김</span></c:if></td>
             <td style="white-space:nowrap">
               <form class="inline-form" method="post" action="${pageContext.request.contextPath}/admin">
                 <input type="hidden" name="csrf" value="${csrf}"><input type="hidden" name="id" value="${r.id()}">
@@ -106,9 +106,9 @@
         <tr><th>시각 (UTC)</th><th>사용자</th><th>이벤트</th><th>내용</th><th>IP</th></tr>
         <c:forEach var="a" items="${audit}">
           <tr>
-            <td class="muted" style="white-space:nowrap"><c:out value="${a.ts()}"/></td>
+            <td class="muted nowrap"><c:out value="${a.ts()}"/></td>
             <td><c:out value="${a.username()}"/></td>
-            <td><span class="pill ${a.event().contains('FAIL') || a.event().contains('LOCK') || a.event().contains('REJECT') || a.event().contains('DENIED') || a.event().contains('REPLAY') ? 'bad' : 'info'}"><c:out value="${a.event()}"/></span></td>
+            <td><span class="pill ${a.event().contains('FAIL') || a.event() == 'ACCOUNT_LOCKED' || a.event().contains('BLOCKED') || a.event().contains('REJECT') || a.event().contains('DENIED') || a.event().contains('REPLAY') ? 'bad' : 'info'}"><c:out value="${a.event()}"/></span></td>
             <td class="mono"><c:out value="${a.detail()}"/></td>
             <td class="muted"><c:out value="${a.ip()}"/></td>
           </tr>
