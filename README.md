@@ -52,7 +52,7 @@ Java/JSP로 만든 **통합인증(SSO) + 2차 인증(TOTP) + DB 개인정보 암
 |---|---|---|
 | 비밀번호 유출 | PBKDF2-HMAC-SHA256 31만 회, 사용자별 salt, 상수 시간 비교 | `PasswordHasher` |
 | 아이디 존재 여부 노출 | 없는 아이디와 틀린 비밀번호에 같은 메시지, 같은 계산 시간 | `LoginServlet` |
-| 무차별 대입 | 비밀번호·OTP 5회 실패 시 계정 5분 잠금, OTP 5회 실패 시 로그인 처음부터 | `UserDao.recordFailure` |
+| 무차별 대입 | 비밀번호·OTP 5회 실패 시 계정 5분 잠금(조건부 UPDATE로 원자적 집계), OTP 5회 실패 시 로그인 처음부터. 잠금 전에 OTP 단계에 들어온 세션도 OTP 확인 직전에 잠금을 다시 확인 | `UserDao.recordFailure`, `Flow.abortIfLocked` |
 | OTP 재사용 | 사용한 시간 단계를 저장하고 `UPDATE ... WHERE OTP_LAST_STEP < ?`로 원자적으로 차단 | `UserDao.consumeOtpStep` |
 | 세션 고정 | 비밀번호 확인 후, 로그인 완료 후 세션 ID 재발급 | `Flow.complete`, `CallbackServlet` |
 | 인가 코드 탈취·재사용 | 60초 만료, 일회용, 발급받은 client_id·redirect_uri와 일치해야 교환 | `AuthCodeStore`, `TokenServlet` |
@@ -60,6 +60,7 @@ Java/JSP로 만든 **통합인증(SSO) + 2차 인증(TOTP) + DB 개인정보 암
 | 로그인 위조(CSRF) | 요청마다 새 `state`, 토큰 재전송 방지용 `nonce` | `AuthFilter`, `CallbackServlet` |
 | 토큰 위조 | RS256만 허용. `alg=none`, RS256→HS256 키 혼동 공격 거부. kid로 JWKS 공개키 선택 | `Jwt.verify` |
 | 위조 로그아웃 요청 | 서명, iss, aud, iat, events, sid 확인, nonce 금지, jti 재사용 차단 | `BackchannelLogoutServlet` |
+| 로그아웃 CSRF | GET 로그아웃은 이 세션의 ID 토큰(`id_token_hint`)이 있을 때만 처리. 그 밖에는 확인 화면에서 CSRF 토큰이 담긴 POST로만 로그아웃 | `LogoutServlet` |
 | 폼 CSRF | 세션별 CSRF 토큰(Synchronizer Token), SameSite=Lax 쿠키 | `Web`, `context.xml` |
 | XSS·클릭재킹 | JSTL `c:out` 출력 이스케이프, CSP, `X-Frame-Options: DENY`, HttpOnly 쿠키 | `SecurityHeadersFilter` |
 | SQL 인젝션 | 모든 쿼리 PreparedStatement 바인딩 | `UserDao`, `AuditDao` |
@@ -76,7 +77,8 @@ Java/JSP로 만든 **통합인증(SSO) + 2차 인증(TOTP) + DB 개인정보 암
 ```
 
 - **AAD로 위치 고정**: 암호화할 때 `TG_USERS.RRN_ENC:<행 ID>`를 AES-GCM의 추가 인증 데이터로 넣습니다. 그래서 다른 행이나 컬럼에 복사한 암호문은 복호화되지 않습니다.
-- **키 교체**: 관리 콘솔에서 새 DEK를 만들면 새 값은 새 키로 암호화되고, 기존 값은 이전 키로 계속 복호화됩니다. "재암호화"를 누르면 모든 값을 활성 키로 옮깁니다. 키 버전별 값 개수를 화면에서 확인할 수 있습니다.
+- **키 교체**: 관리 콘솔에서 새 DEK를 만들면 새 값은 새 키로 암호화되고, 기존 값은 이전 키로 계속 복호화됩니다. "재암호화"를 누르면 모든 값을 활성 키로 옮깁니다. 재암호화는 읽은 값이 그대로일 때만 덮어써서(낙관적 잠금), 그 사이 바뀐 값을 잃지 않습니다. 키 버전별 값 개수를 화면에서 확인할 수 있습니다.
+- **키 폐기**: 재암호화가 끝나 더 이상 쓰이지 않는 이전 키(RETIRED)는 관리 콘솔에서 폐기(DESTROYED)할 수 있습니다. 감싼 키 값이 지워져, 그 키로 암호화된 예전 백업은 복호화할 수 없게 됩니다.
 - **검색**: 같은 평문도 매번 다른 암호문이 되므로, 검색과 중복 가입 확인은 별도 키로 만든 HMAC 값으로 합니다. 검색 토큰에서는 평문이나 암호문을 알아낼 수 없습니다.
 - **서명 키 보호**: IdP의 RSA 토큰 서명 개인키도 KEK로 감싸서 저장합니다.
 
@@ -107,8 +109,8 @@ compose의 값은 데모용 기본값입니다. `TG_DB_URL`을 지정하지 않�
 powershell -ExecutionPolicy Bypass -File .\run_tests.ps1
 ```
 
-1. **단위 테스트 (JUnit 5, 38개)**: RFC 6238·RFC 4648 테스트 벡터, PBKDF2, 암호문 변조·AAD 불일치·다른 KEK 거부, 키 교체 후 복호화와 재암호화, 블라인드 인덱스 검색, OTP 재사용 차단, 계정 잠금, JWT 변조·`alg=none`·HS256 키 혼동·외부 키 서명 거부, ID 토큰·로그아웃 토큰 클레임 검증
-2. **End-to-End (36개 항목)**: Tomcat + Oracle을 띄우고, 쿠키·리다이렉트·CSRF 토큰을 처리하는 Python 클라이언트로 실제 HTTP 흐름을 실행합니다. OTP 코드는 서버와 별개로 Python에서 계산해서 표준 인증 앱과 호환되는지도 확인합니다. Oracle에 직접 SQL로 조회해 평문이 저장되지 않았는지도 확인합니다.
+1. **단위 테스트 (JUnit 5, 41개)**: RFC 6238·RFC 4648 테스트 벡터, PBKDF2, 암호문 변조·AAD 불일치·다른 KEK 거부, 키 교체 후 복호화와 재암호화, 블라인드 인덱스 검색, OTP 재사용 차단, 계정 잠금, JWT 변조·`alg=none`·HS256 키 혼동·외부 키 서명 거부, ID 토큰·로그아웃 토큰 클레임 검증, 동시 실패 집계, 재암호화 중 값 변경 보호, 이전 키 폐기
+2. **End-to-End (44개 항목)**: Tomcat + Oracle을 띄우고, 쿠키·리다이렉트·CSRF 토큰을 처리하는 Python 클라이언트로 실제 HTTP 흐름을 실행합니다. OTP 코드는 서버와 별개로 Python에서 계산해서 표준 인증 앱과 호환되는지도 확인합니다. Oracle에 직접 SQL로 조회해 평문이 저장되지 않았는지도 확인합니다.
 3. 결과를 `test-results/report.html`로 정리합니다.
 
 데이터베이스에 실제로 저장된 값(암호문, 블라인드 인덱스, 감싼 키)은 `show_db.ps1`로 바로 볼 수 있습니다.
@@ -120,10 +122,13 @@ powershell -ExecutionPolicy Bypass -File .\run_tests.ps1
 == 6. DB 암호화·키 관리 (Oracle) ==
   [PASS] Oracle에 직접 조회해도 주민등록번호 평문이 없음  (e2e258928|v3:KcVnLkWcGZ2elyuNcd+n61ys...)
   [PASS] 재암호화 후 모든 값이 새 키 버전 하나로 이동  (전 [('3', '24')] → 후 [('4', '24')])
-== 7. 통합 로그아웃 (Back-Channel Logout) ==
+== 7. 보안 점검에서 찾은 문제 (회귀 테스트) ==
+  [PASS] 잠금 이전에 OTP 단계에 들어온 다른 세션도 거부 (잠금 우회 차단)  (/idp/otp → /idp/login)
+  [PASS] 다른 사이트의 링크(GET)로는 로그아웃되지 않고 확인 화면 표시 (로그아웃 CSRF 방지)
+== 8. 통합 로그아웃 (Back-Channel Logout) ==
   [PASS] 웹메일 세션도 IdP 통보로 이미 종료됨 (다시 로그인 요구)  (/mail/ → /idp/authorize → /idp/login)
 
-36/36 checks passed
+44/44 checks passed
 ```
 
 ## 테스트 중 발견한 문제와 해결
@@ -137,6 +142,18 @@ powershell -ExecutionPolicy Bypass -File .\run_tests.ps1
 | 감사 로그에서 `ACCOUNT_UNLOCKED`가 실패처럼 빨간색으로 표시 | 이벤트 이름에 `LOCK`이 들어가면 빨간색으로 칠하는 조건이 `UNLOCK`까지 잡음 | 실패·잠금·차단 이벤트를 정확한 이름으로 구분 |
 | OTP 재사용 테스트 직후, 데모 상자에 방금 쓴 코드가 그대로 보임 | 같은 30초 구간 안이라 정상 동작이지만, 처음 쓰는 사람은 "새 코드"를 찾지 못함 | 테스트 가이드에 30초 대기 후 화면을 다시 여는 방법을 안내 |
 | 관리자 사용자 추가가 E2E에서만 실패 | 테스트가 폼이 없는 페이지에서 CSRF 토큰을 읽어 빈 값으로 전송했고, 서버가 정상적으로 거부함 | 테스트가 관리 콘솔 페이지의 토큰을 쓰도록 수정. CSRF 방어가 의도대로 동작함을 확인 |
+
+### 보안 점검에서 찾아 고친 문제
+
+테스트가 모두 통과한 상태에서 코드를 다시 검토하고, 실행 중인 환경에서 직접 재현해 찾은 문제입니다. 고친 뒤 E2E·단위 테스트에 회귀 항목으로 추가했습니다.
+
+| 문제 | 원인 | 해결 |
+|---|---|---|
+| 계정이 잠긴 뒤에도, 잠금 전에 OTP 단계에 들어온 다른 세션은 올바른 OTP로 로그인 성공 (실제 재현) | 잠금 확인이 비밀번호 단계에만 있었음. 세션을 여러 개 열어 두면 세션마다 OTP를 5번씩 추측할 수 있었음 | OTP 입력·등록 단계에서도 잠금을 다시 확인하고, 잠겨 있으면 진행 중인 로그인을 버림 |
+| 외부 사이트의 링크만으로 사용자를 강제 로그아웃시킬 수 있음 | `/idp/logout`이 CSRF 확인 없는 GET 요청으로 동작 | 서비스가 보낸 `id_token_hint`가 이 세션의 것일 때만 GET으로 처리하고, 그 밖에는 확인 화면에서 CSRF 토큰이 담긴 POST로만 로그아웃 |
+| 동시에 실패가 몰리면 잠금 횟수 집계가 어긋날 수 있음 | 증가 → 다시 읽기 → 잠금이 세 번의 쿼리로 나뉘어 있었음 | 각 단계를 조건부 UPDATE 한 문장으로 처리. 10개 스레드 동시 실패 시 정확히 두 번 잠기는지 테스트 |
+| 재암호화 도중 OTP를 다시 등록하면 새 비밀키가 예전 값으로 덮어써질 수 있음 | 사용자 목록을 먼저 읽고 나중에 쓰는 동안 값이 바뀔 수 있었음 | 읽었던 값이 그대로일 때만 쓰는 조건(낙관적 잠금)을 UPDATE에 추가 |
+| 다 쓴 이전 데이터 키가 계속 남음 | 키 수명 주기에 폐기 단계가 없었음 | 쓰는 값이 0개인 RETIRED 키를 관리 콘솔에서 폐기(DESTROYED)하고 감사 로그에 기록 |
 
 ## 한계와 다음 단계
 

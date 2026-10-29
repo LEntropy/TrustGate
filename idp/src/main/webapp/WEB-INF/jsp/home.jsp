@@ -6,7 +6,10 @@
   <div class="brand">TrustGate <span class="tag">통합인증 IdP</span></div>
   <nav>
     <c:if test="${user.isAdmin()}"><a href="${pageContext.request.contextPath}/admin">보안 관리 콘솔</a></c:if>
-    <a href="${pageContext.request.contextPath}/logout">로그아웃</a>
+    <form class="inline-form" method="post" action="${pageContext.request.contextPath}/logout">
+      <input type="hidden" name="csrf" value="${csrf}">
+      <button class="small ghost">로그아웃</button>
+    </form>
   </nav>
 </div>
 <main>

@@ -39,6 +39,7 @@ public class EnrollServlet extends HttpServlet {
             resp.sendRedirect(req.getContextPath() + "/login");
             return;
         }
+        if (Flow.abortIfLocked(idp, req, resp, u.get())) return;
         HttpSession s = req.getSession();
         byte[] secret = (byte[]) s.getAttribute(Flow.ENROLL_SECRET);
         if (secret == null) {
@@ -67,6 +68,7 @@ public class EnrollServlet extends HttpServlet {
             return;
         }
         User u = pending.get();
+        if (Flow.abortIfLocked(idp, req, resp, u)) return;
         OptionalLong step = idp.totp.verify(secret, req.getParameter("code"));
         if (step.isEmpty()) {
             idp.audit.log(u.username(), "OTP_ENROLL_FAIL", "wrong code", Web.clientIp(req));

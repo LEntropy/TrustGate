@@ -181,51 +181,56 @@ public final class UserDao {
                 + "AND (OTP_LAST_STEP IS NULL OR OTP_LAST_STEP < ?)", step, id, step) == 1;
     }
 
-    /** Counts a failed attempt; locks the account for `lockFor` once `max` is reached. */
+    /**
+     * Counts a failed attempt; locks the account for `lockFor` once `max` is reached.
+     *
+     * <p>Each statement decides and writes in one step, so concurrent failures cannot interleave
+     * between reading the count and locking. If neither statement matched, another request changed
+     * the count in between; trying again sees the new value.
+     */
     public boolean recordFailure(long id, int max, Duration lockFor) {
-        update("UPDATE TG_USERS SET FAILED_COUNT = FAILED_COUNT + 1 WHERE ID = ?", id);
-        User u = findById(id).orElseThrow();
-        if (u.failedCount() >= max) {
-            update("UPDATE TG_USERS SET FAILED_COUNT = 0, LOCKED_UNTIL = ? WHERE ID = ?",
-                    Timestamp.from(Instant.now().plus(lockFor)), id);
-            return true;
+        for (int attempt = 0; attempt < 10; attempt++) {
+            if (update("UPDATE TG_USERS SET FAILED_COUNT = 0, LOCKED_UNTIL = ? WHERE ID = ? AND FAILED_COUNT + 1 >= ?",
+                    Timestamp.from(Instant.now().plus(lockFor)), id, max) == 1) {
+                return true;
+            }
+            if (update("UPDATE TG_USERS SET FAILED_COUNT = FAILED_COUNT + 1 WHERE ID = ? AND FAILED_COUNT + 1 < ?",
+                    id, max) == 1) {
+                return false;
+            }
+            if (findById(id).isEmpty()) throw new DataAccessException(new SQLException("no user " + id));
         }
-        return false;
+        throw new DataAccessException(new SQLException("failure counter kept changing for user " + id));
     }
 
     public void resetFailures(long id) {
         update("UPDATE TG_USERS SET FAILED_COUNT = 0, LOCKED_UNTIL = NULL WHERE ID = ?", id);
     }
 
-    /** Re-encrypts every value written under an older data key. Returns the number of values. */
+    /**
+     * Re-encrypts every value written under an older data key. Returns the number of values.
+     *
+     * <p>Rows are read first and written later, so a value may change in between (for example an
+     * OTP reset and re-enrolment). Each write only applies if the column still holds the value
+     * that was read (optimistic locking); otherwise the newer value is kept and, if it still uses
+     * an old key, the next run picks it up.
+     */
     public int reencryptAll() {
         int changed = 0;
         for (User u : findAll()) {
-            String rrn = u.rrnEnc();
-            String phone = u.phoneEnc();
-            String otp = u.otpSecretEnc();
-            boolean dirty = false;
-            if (cipher.needsReencryption(rrn)) {
-                rrn = cipher.encrypt(cipher.decrypt(rrn, rrnContext(u.id())), rrnContext(u.id()));
-                dirty = true;
-                changed++;
-            }
-            if (cipher.needsReencryption(phone)) {
-                phone = cipher.encrypt(cipher.decrypt(phone, phoneContext(u.id())), phoneContext(u.id()));
-                dirty = true;
-                changed++;
-            }
-            if (cipher.needsReencryption(otp)) {
-                otp = cipher.encrypt(cipher.decrypt(otp, otpContext(u.id())), otpContext(u.id()));
-                dirty = true;
-                changed++;
-            }
-            if (dirty) {
-                update("UPDATE TG_USERS SET RRN_ENC = ?, PHONE_ENC = ?, OTP_SECRET_ENC = ? WHERE ID = ?",
-                        rrn, phone, otp, u.id());
-            }
+            changed += reencryptColumn("RRN_ENC", u.rrnEnc(), rrnContext(u.id()), u.id());
+            changed += reencryptColumn("PHONE_ENC", u.phoneEnc(), phoneContext(u.id()), u.id());
+            changed += reencryptColumn("OTP_SECRET_ENC", u.otpSecretEnc(), otpContext(u.id()), u.id());
         }
         return changed;
+    }
+
+    /** Package-private so tests can simulate a value changing between read and write. */
+    int reencryptColumn(String column, String stored, String context, long id) {
+        if (!cipher.needsReencryption(stored)) return 0;
+        String fresh = cipher.encrypt(cipher.decrypt(stored, context), context);
+        // The column name comes from the fixed list above, never from input.
+        return update("UPDATE TG_USERS SET " + column + " = ? WHERE ID = ? AND " + column + " = ?", fresh, id, stored);
     }
 
     /** How many encrypted values each data-key version currently protects. */

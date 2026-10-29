@@ -1,6 +1,7 @@
 package com.trustgate.idp;
 
 import com.trustgate.core.token.Jwt;
+import com.trustgate.core.token.TokenException;
 import com.trustgate.core.web.Web;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.annotation.WebServlet;
@@ -24,6 +25,11 @@ import java.util.Optional;
  * Single logout. Ends the IdP session and tells every service provider that received a token
  * for it, server to server (OIDC Back-Channel Logout), so their sessions end too even if the
  * user never visits them again.
+ *
+ * <p>Logging out changes state, so a plain cross-site link must not be able to trigger it
+ * (logout CSRF). A GET request is accepted only from a service provider that proves the
+ * request is about this session with an {@code id_token_hint} it received for it (OIDC
+ * RP-Initiated Logout); anything else gets a confirmation page that posts with a CSRF token.
  */
 @WebServlet("/logout")
 public class LogoutServlet extends HttpServlet {
@@ -31,6 +37,44 @@ public class LogoutServlet extends HttpServlet {
 
     @Override
     protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+        Idp idp = Idp.get(getServletContext());
+        Optional<SsoSession> sso = Flow.sso(req);
+        if (sso.isPresent() && !validHint(idp, req, sso.get())) {
+            req.setAttribute("clientId", req.getParameter("client_id"));
+            req.setAttribute("postLogoutRedirectUri", req.getParameter("post_logout_redirect_uri"));
+            Flow.render(req, resp, "logout_confirm");
+            return;
+        }
+        logout(req, resp);
+    }
+
+    @Override
+    protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+        if (!Web.validCsrf(req)) {
+            Flow.error(req, resp, 400, "요청이 만료되었거나 위조되었습니다. (CSRF 토큰 불일치)");
+            return;
+        }
+        logout(req, resp);
+    }
+
+    /**
+     * The hint must be an ID token this IdP signed for the named client and for the current SSO
+     * session. Expiry is not checked: an expired ID token still identifies the session (OIDC
+     * RP-Initiated Logout 1.0, section 2).
+     */
+    private static boolean validHint(Idp idp, HttpServletRequest req, SsoSession sso) {
+        String hint = req.getParameter("id_token_hint");
+        String clientId = req.getParameter("client_id");
+        if (hint == null || clientId == null) return false;
+        try {
+            Map<String, Object> c = Jwt.verify(hint, kid -> kid.equals(idp.signing.kid()) ? idp.signing.publicKey() : null);
+            return idp.issuer.equals(c.get("iss")) && clientId.equals(c.get("aud")) && sso.sid().equals(c.get("sid"));
+        } catch (TokenException e) {
+            return false;
+        }
+    }
+
+    private void logout(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
         Idp idp = Idp.get(getServletContext());
         Optional<SsoSession> sso = Flow.sso(req);
         List<Result> results = new ArrayList<>();

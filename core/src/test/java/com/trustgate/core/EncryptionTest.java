@@ -139,6 +139,42 @@ class EncryptionTest {
     }
 
     @Test
+    @DisplayName("A retired data key can be destroyed after re-encryption; old ciphertexts then stay unreadable")
+    void destroyRetiredKey() {
+        long id = createHong();
+        String oldRrn = users.findById(id).orElseThrow().rrnEnc();   // e.g. a value in an old backup
+        keys.rotate();
+        users.reencryptAll();
+        assertThrows(CryptoException.class, () -> keys.destroy(2));  // the active key
+        keys.destroy(1);
+        assertThrows(CryptoException.class, () -> keys.destroy(1));  // already destroyed
+        assertThrows(CryptoException.class, () -> cipher.decrypt(oldRrn, "TG_USERS.RRN_ENC:" + id));
+        assertEquals("9001011234567", users.rrn(users.findById(id).orElseThrow()));
+        assertTrue(keys.list().stream().anyMatch(k -> k.version() == 1 && k.status().equals("DESTROYED")));
+    }
+
+    @Test
+    @DisplayName("Concurrent failures are counted exactly: 10 failures lock the account exactly twice")
+    void concurrentFailures() throws Exception {
+        long id = createHong();
+        var pool = java.util.concurrent.Executors.newFixedThreadPool(10);
+        var start = new java.util.concurrent.CountDownLatch(1);
+        var futures = new java.util.ArrayList<java.util.concurrent.Future<Boolean>>();
+        for (int i = 0; i < 10; i++) {
+            futures.add(pool.submit(() -> {
+                start.await();
+                return users.recordFailure(id, 5, Duration.ofMinutes(5));
+            }));
+        }
+        start.countDown();
+        int locks = 0;
+        for (var f : futures) if (f.get()) locks++;
+        pool.shutdown();
+        assertEquals(2, locks);
+        assertEquals(0, users.findById(id).orElseThrow().failedCount());
+    }
+
+    @Test
     @DisplayName("An OTP time step can be used only once (replay protection)")
     void otpReplay() {
         long id = createHong();

@@ -67,6 +67,25 @@ final class Flow {
         return id == null ? Optional.empty() : idp.users.findById(id);
     }
 
+    /**
+     * The lock check in /login only covers new logins. A login that passed the password step
+     * before the account was locked must not be able to finish (or keep guessing OTP codes),
+     * so every second-factor step checks the lock again and abandons the attempt if needed.
+     * Returns true when the request was answered with a redirect.
+     */
+    static boolean abortIfLocked(Idp idp, HttpServletRequest req, HttpServletResponse resp, User u)
+            throws IOException {
+        if (!u.isLocked(Instant.now())) return false;
+        HttpSession s = req.getSession();
+        s.removeAttribute(PENDING_USER);
+        s.removeAttribute(OTP_ATTEMPTS);
+        s.removeAttribute(ENROLL_SECRET);
+        idp.audit.log(u.username(), "LOGIN_BLOCKED", "account locked during second factor", Web.clientIp(req));
+        s.setAttribute(FLASH, "로그인 실패가 반복되어 계정이 잠겼습니다. 잠시 후 처음부터 다시 로그인해 주세요.");
+        resp.sendRedirect(req.getContextPath() + "/login");
+        return true;
+    }
+
     /** Both factors verified: start the SSO session and continue where the user came from. */
     static void complete(Idp idp, HttpServletRequest req, HttpServletResponse resp, User u)
             throws IOException {

@@ -98,6 +98,26 @@ public final class KeyManager {
         }
     }
 
+    /**
+     * Destroys a retired data key: the wrapped key material is deleted and the version is marked
+     * DESTROYED, so old backups encrypted under it can no longer be decrypted. The caller must
+     * first make sure no stored value still uses this version (re-encrypt, then check the count).
+     * Only RETIRED encryption keys qualify; the active key and the index key never do.
+     */
+    public synchronized void destroy(int version) {
+        if (version == activeVersion) throw new CryptoException("the active data key cannot be destroyed");
+        try (Connection c = ds.getConnection();
+             PreparedStatement ps = c.prepareStatement("UPDATE TG_KEYS SET STATUS = 'DESTROYED', WRAPPED_KEY = 'DESTROYED' "
+                     + "WHERE VERSION = ? AND PURPOSE = ? AND STATUS = 'RETIRED'")) {
+            ps.setInt(1, version);
+            ps.setString(2, PURPOSE_ENC);
+            if (ps.executeUpdate() != 1) throw new CryptoException("only a retired data key can be destroyed: v" + version);
+        } catch (SQLException e) {
+            throw new IllegalStateException("key destruction failed", e);
+        }
+        cache.remove(PURPOSE_ENC + version);
+    }
+
     public List<KeyInfo> list() {
         List<KeyInfo> out = new ArrayList<>();
         try (Connection c = ds.getConnection();
@@ -118,11 +138,12 @@ public final class KeyManager {
         return cache.computeIfAbsent(purpose + version, k -> {
             try (Connection c = ds.getConnection();
                  PreparedStatement ps = c.prepareStatement(
-                         "SELECT WRAPPED_KEY FROM TG_KEYS WHERE VERSION = ? AND PURPOSE = ?")) {
+                         "SELECT WRAPPED_KEY, STATUS FROM TG_KEYS WHERE VERSION = ? AND PURPOSE = ?")) {
                 ps.setInt(1, version);
                 ps.setString(2, purpose);
                 try (ResultSet rs = ps.executeQuery()) {
                     if (!rs.next()) throw new CryptoException("unknown key version " + purpose + version);
+                    if ("DESTROYED".equals(rs.getString(2))) throw new CryptoException("key " + purpose + version + " was destroyed");
                     byte[] raw = kek.unwrap(Base64.getDecoder().decode(rs.getString(1)), aad(version, purpose));
                     return new SecretKeySpec(raw, "AES");
                 }

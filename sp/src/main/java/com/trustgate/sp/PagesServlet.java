@@ -36,9 +36,12 @@ public class PagesServlet extends HttpServlet {
         }
         Sp sp = Sp.get(getServletContext());
         HttpSession s = req.getSession(false);
+        SpUser user = s == null ? null : (SpUser) s.getAttribute(SpUser.ATTR);
         if (s != null) s.invalidate();
         // Then end the IdP session, which notifies the other services over the back channel.
+        // The ID token we received is the hint that proves this logout request comes from us.
         resp.sendRedirect(sp.idpPublicUrl + "/logout?client_id=" + Sp.enc(sp.clientId)
-                + "&post_logout_redirect_uri=" + Sp.enc(sp.baseUrl + "/logged-out"));
+                + "&post_logout_redirect_uri=" + Sp.enc(sp.baseUrl + "/logged-out")
+                + (user == null ? "" : "&id_token_hint=" + Sp.enc(user.idToken())));
     }
 }

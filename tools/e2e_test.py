@@ -286,8 +286,49 @@ def main():
     s, url, html, _, _ = admin.post("/idp/admin", {"csrf": csrf(admin.get("/idp/admin")[2]), "action": "search", "rrn": rrn})
     check("암호화된 주민등록번호를 블라인드 인덱스로 검색", username in html)
 
+    # ------------------------------------------------------------------ regression: review findings
+    section("7. 보안 점검에서 찾은 문제 (회귀 테스트)")
+    b1, b2 = Browser(), Browser()
+    pages = []
+    for x in (b1, b2):
+        s, url, html, _, _ = x.get("/portal/")
+        s, url, html, _, _ = x.post("/idp/login", {"csrf": csrf(html), "username": username, "password": password})
+        pages.append(html)
+    check("두 세션이 비밀번호를 통과해 OTP 단계에서 대기", "/otp" in url)
+    html = pages[0]
+    for i in range(5):
+        s, url, html, _, _ = b1.post("/idp/otp", {"csrf": csrf(html), "code": "000000"})
+    check("한 세션에서 OTP 5회 실패로 계정 잠금", "잠갔습니다" in html or "잠겼습니다" in html)
+    s, url, html, chain, _ = b2.post("/idp/otp", {"csrf": csrf(pages[1]),
+                                                  "code": totp(secret, int(time.time()) // 30 + 1)})
+    check("잠금 이전에 OTP 단계에 들어온 다른 세션도 거부 (잠금 우회 차단)",
+          url.endswith("/idp/login") and "잠겼습니다" in html and not any("/portal/callback" in u for u in chain),
+          " → ".join(urllib.parse.urlparse(u).path for u in chain))
+    s, url, html, _, _ = admin.get("/idp/admin")
+    uid = re.search(rf'<td>(\d+)</td>\s*<td>{username}<', html)
+    if uid:
+        admin.post("/idp/admin", {"csrf": csrf(html), "action": "unlock", "id": uid.group(1)})
+
+    s, url, html, _, _ = b.get("/idp/logout")
+    check("다른 사이트의 링크(GET)로는 로그아웃되지 않고 확인 화면 표시 (로그아웃 CSRF 방지)",
+          s == 200 and "로그아웃할까요" in html)
+    s, url, html, _, _ = b.get("/idp/logout?client_id=portal&id_token_hint=e30.e30.AAAA")
+    check("위조된 id_token_hint로도 바로 로그아웃되지 않음", "로그아웃할까요" in html)
+    s, url, html, _, _ = b.get("/idp/")
+    check("확인 화면만 열어서는 SSO 세션이 유지됨", url.endswith("/idp/") and "로그인되어 있습니다" in html)
+
+    s, url, html, _, _ = admin.get("/idp/admin")
+    retired = [v for v in re.findall(r'name="version" value="(\d+)"', html)]
+    if retired:
+        s, url, html, _, _ = admin.post("/idp/admin", {"csrf": csrf(html), "action": "destroyKey", "version": retired[0]})
+        check("재암호화가 끝난 이전 데이터 키 폐기", f"v{retired[0]}를 폐기했습니다" in html, f"v{retired[0]} → DESTROYED")
+        s, url, html, _, _ = b.get("/idp/")
+        check("키 폐기 후에도 사용자 정보 복호화 정상", rrn[:6] + "-1******" in html)
+    else:
+        check("재암호화가 끝난 이전 데이터 키 폐기", False, "폐기 버튼이 보이지 않음")
+
     # ------------------------------------------------------------------ single logout
-    section("7. 통합 로그아웃 (Back-Channel Logout)")
+    section("8. 통합 로그아웃 (Back-Channel Logout)")
     s, url, html, _, _ = b.get("/portal/")
     s, url, html, chain, _ = b.post("/portal/logout", {"csrf": csrf(html)})
     check("포털에서 로그아웃하면 IdP를 거쳐 로그아웃 완료 화면", url.endswith("/portal/logged-out"),

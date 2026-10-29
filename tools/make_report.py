@@ -15,6 +15,7 @@ AREAS = {
     "PasswordAndMaskingTest": "비밀번호 해시 · 마스킹",
     "EncryptionTest": "DB 컬럼 암호화 · 키 관리",
     "JwtTest": "SSO 토큰 (JWT RS256) · 공격 차단",
+    "ReencryptRaceTest": "재암호화 동시 변경 보호",
 }
 
 CSS = """

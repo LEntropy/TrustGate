@@ -25,6 +25,7 @@ public class OtpServlet extends HttpServlet {
             resp.sendRedirect(req.getContextPath() + "/login");
             return;
         }
+        if (Flow.abortIfLocked(idp, req, resp, u.get())) return;
         req.setAttribute("username", u.get().username());
         if (idp.demoMode) req.setAttribute("demoCode", idp.totp.currentCode(idp.users.otpSecret(u.get())));
         Flow.render(req, resp, "otp");
@@ -43,6 +44,7 @@ public class OtpServlet extends HttpServlet {
             return;
         }
         User u = pending.get();
+        if (Flow.abortIfLocked(idp, req, resp, u)) return;
         String ip = Web.clientIp(req);
         OptionalLong step = idp.totp.verify(idp.users.otpSecret(u), req.getParameter("code"));
 

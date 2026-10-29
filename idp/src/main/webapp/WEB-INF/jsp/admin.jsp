@@ -6,7 +6,10 @@
   <div class="brand">TrustGate <span class="tag">보안 관리 콘솔</span></div>
   <nav>
     <a href="${pageContext.request.contextPath}/">내 계정</a>
-    <a href="${pageContext.request.contextPath}/logout">로그아웃</a>
+    <form class="inline-form" method="post" action="${pageContext.request.contextPath}/logout">
+      <input type="hidden" name="csrf" value="${csrf}">
+      <button class="small ghost">로그아웃</button>
+    </form>
   </nav>
 </div>
 <main>
@@ -48,13 +51,21 @@
       <h2>키 관리 (Envelope Encryption)</h2>
       <p class="muted">KEK: <c:out value="${kek}"/></p>
       <table>
-        <tr><th>용도</th><th>버전</th><th>상태</th><th>생성</th></tr>
+        <tr><th>용도</th><th>버전</th><th>상태</th><th>생성</th><th></th></tr>
         <c:forEach var="k" items="${keys}">
           <tr>
             <td><c:out value="${k.purpose() == 'ENC' ? '데이터 암호화' : '블라인드 인덱스'}"/></td>
             <td>v<c:out value="${k.version()}"/></td>
-            <td><span class="pill ${k.status() == 'ACTIVE' ? 'ok' : 'warn'}"><c:out value="${k.status()}"/></span></td>
+            <td><span class="pill ${k.status() == 'ACTIVE' ? 'ok' : (k.status() == 'DESTROYED' ? 'bad' : 'warn')}"><c:out value="${k.status()}"/></span></td>
             <td class="muted"><c:out value="${k.createdAt()}"/></td>
+            <td>
+              <c:if test="${k.purpose() == 'ENC' && destroyable.contains(k.version())}">
+                <form class="inline-form" method="post" action="${pageContext.request.contextPath}/admin">
+                  <input type="hidden" name="csrf" value="${csrf}"><input type="hidden" name="version" value="${k.version()}">
+                  <button class="small ghost" name="action" value="destroyKey">폐기</button>
+                </form>
+              </c:if>
+            </td>
           </tr>
         </c:forEach>
       </table>

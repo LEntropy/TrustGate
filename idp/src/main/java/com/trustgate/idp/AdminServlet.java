@@ -1,6 +1,8 @@
 package com.trustgate.idp;
 
+import com.trustgate.core.crypto.CryptoException;
 import com.trustgate.core.crypto.FieldCipher;
+import com.trustgate.core.crypto.KeyManager;
 import com.trustgate.core.crypto.Masking;
 import com.trustgate.core.db.User;
 import com.trustgate.core.db.UserDao;
@@ -13,9 +15,11 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -56,6 +60,21 @@ public class AdminServlet extends HttpServlet {
                 int v = idp.keys.rotate();
                 idp.audit.log(who, "KEY_ROTATED", "new active data key v" + v, ip);
                 message = "새 데이터 키 v" + v + "를 생성해 활성화했습니다. 기존 값은 이전 키로 계속 복호화됩니다.";
+            }
+            case "destroyKey" -> {
+                int v = Integer.parseInt(req.getParameter("version"));
+                int remaining = idp.users.valuesPerKeyVersion().getOrDefault(v, 0);
+                if (remaining > 0) {
+                    message = "키 v" + v + "로 암호화된 값이 아직 " + remaining + "개 있어 폐기할 수 없습니다. 먼저 재암호화해 주세요.";
+                } else {
+                    try {
+                        idp.keys.destroy(v);
+                        idp.audit.log(who, "KEY_DESTROYED", "retired data key v" + v + " destroyed", ip);
+                        message = "사용이 끝난 데이터 키 v" + v + "를 폐기했습니다. 이 키로 암호화된 예전 백업은 더 이상 복호화할 수 없습니다.";
+                    } catch (CryptoException e) {
+                        message = "키 v" + v + "는 폐기할 수 없습니다. 사용이 끝난(RETIRED) 데이터 키만 폐기할 수 있습니다.";
+                    }
+                }
             }
             case "reencrypt" -> {
                 int n = idp.users.reencryptAll();
@@ -125,9 +144,20 @@ public class AdminServlet extends HttpServlet {
                     u.rrnEnc() == null ? 0 : FieldCipher.versionOf(u.rrnEnc()), u.otpEnabled(), u.isLocked(now)));
         }
         req.setAttribute("rows", rows);
-        req.setAttribute("keys", idp.keys.list());
+        List<KeyManager.KeyInfo> keys = idp.keys.list();
+        Map<Integer, Integer> perVersion = idp.users.valuesPerKeyVersion();
+        // A retired data key that no stored value uses any more can be destroyed.
+        Set<Integer> destroyable = new HashSet<>();
+        for (KeyManager.KeyInfo k : keys) {
+            if (KeyManager.PURPOSE_ENC.equals(k.purpose()) && "RETIRED".equals(k.status())
+                    && perVersion.getOrDefault(k.version(), 0) == 0) {
+                destroyable.add(k.version());
+            }
+        }
+        req.setAttribute("keys", keys);
+        req.setAttribute("destroyable", destroyable);
         req.setAttribute("activeVersion", idp.keys.activeVersion());
-        req.setAttribute("perVersion", idp.users.valuesPerKeyVersion());
+        req.setAttribute("perVersion", perVersion);
         req.setAttribute("kek", idp.keys.kekDescription());
         req.setAttribute("audit", idp.audit.recent(40));
         req.setAttribute("dbProduct", dbProduct(idp));
