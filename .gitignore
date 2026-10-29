@@ -1,0 +1,6 @@
+target/
+test-results/
+.idea/
+.vscode/
+*.iml
+.env

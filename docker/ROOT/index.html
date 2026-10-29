@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TrustGate</title>
+<link rel="stylesheet" href="/idp/static/app.css">
+</head>
+<body>
+<div class="top"><div class="brand">TrustGate <span class="tag">SSO · 2FA · DB 암호화 데모</span></div></div>
+<main style="max-width:760px">
+  <div class="card">
+    <h1>TrustGate 데모</h1>
+    <p class="sub">통합인증 서버(IdP) 하나와, 그 인증을 함께 쓰는 서비스 두 개가 실행 중입니다.</p>
+    <div class="services">
+      <a class="service" href="/portal/"><b>사내 포털</b><span>/portal · SSO 연동 서비스</span></a>
+      <a class="service" href="/mail/"><b>웹메일</b><span>/mail · SSO 연동 서비스</span></a>
+      <a class="service" href="/idp/"><b>TrustGate IdP</b><span>/idp · 로그인, OTP, 관리 콘솔</span></a>
+    </div>
+    <ol class="steps" style="margin-top:16px">
+      <li>사내 포털을 열면 IdP 로그인 화면으로 이동합니다. (user1 / User!2345)</li>
+      <li>처음 로그인하면 OTP를 등록하고, 이후에는 6자리 코드를 입력합니다.</li>
+      <li>포털에서 웹메일로 이동하면 다시 로그인하지 않고 들어갑니다. (SSO)</li>
+      <li>admin / Admin!2345로 로그인해 /idp/admin에서 DB에 저장된 암호문과 키 교체를 확인합니다.</li>
+    </ol>
+  </div>
+</main>
+</body>
+</html>

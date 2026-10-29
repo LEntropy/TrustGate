@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.trustgate</groupId>
+    <artifactId>trustgate</artifactId>
+    <version>0.1.0</version>
+  </parent>
+  <artifactId>trustgate-sp</artifactId>
+  <packaging>war</packaging>
+  <name>TrustGate service provider</name>
+  <description>SSO client application. The same WAR is deployed as /portal and /mail.</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.trustgate</groupId>
+      <artifactId>trustgate-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>jakarta.servlet</groupId>
+      <artifactId>jakarta.servlet-api</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>jakarta.servlet.jsp.jstl</groupId>
+      <artifactId>jakarta.servlet.jsp.jstl-api</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.glassfish.web</groupId>
+      <artifactId>jakarta.servlet.jsp.jstl</artifactId>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <finalName>sp</finalName>
+  </build>
+</project>
